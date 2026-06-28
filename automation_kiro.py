@@ -177,9 +177,9 @@ def connect_kiro_account(email, password):
         curr_url_after_continue = driver.current_url
         print(f"[AWS] URL after Continue: {curr_url_after_continue[:120]}", flush=True)
         if "profile.aws.amazon.com" in curr_url_after_continue and "signup" in curr_url_after_continue:
-            raise Exception(f"Account has no AWS Builder ID â€” redirected to AWS signup page: {curr_url_after_continue}")
+            raise Exception(f"Account has no AWS Builder ID - redirected to AWS signup page: {curr_url_after_continue}")
         if "profile.aws.amazon.com" in curr_url_after_continue:
-            raise Exception(f"Account has no AWS Builder ID â€” on AWS profile page: {curr_url_after_continue}")
+            raise Exception(f"Account has no AWS Builder ID - on AWS profile page: {curr_url_after_continue}")
         
         # 10. Perform Google Login (or standard password field if it didn't federate)
         print("[Google] Handling authentication redirect...")
@@ -215,7 +215,7 @@ def connect_kiro_account(email, password):
             # Rethrow our specific errors immediately
             if any(kw in str(e) for kw in ["no AWS Builder ID", "deleted", "does not exist"]):
                 raise
-            # Otherwise may be on AWS password screen â€” continue
+            # Otherwise may be on AWS password screen - continue
             
         # Enter Password (either Google or AWS password screen)
         print("[Google/AWS] Entering password...")
@@ -242,7 +242,7 @@ def connect_kiro_account(email, password):
             if "rejected" in curr_url or "sign you in" in page_text.lower() or "Couldn't sign you in" in curr_title or "may not be secure" in page_text:
                 raise Exception("Google blocked sign-in with security warning ('browser or app not secure').")
             if "profile.aws.amazon.com" in curr_url:
-                raise Exception(f"Account has no AWS Builder ID â€” on AWS profile/signup page: {curr_url}")
+                raise Exception(f"Account has no AWS Builder ID - on AWS profile/signup page: {curr_url}")
             raise Exception(f"Failed or timed out waiting for password field. Error: {e}")
 
         password_field.clear()

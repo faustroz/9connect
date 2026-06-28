@@ -2,10 +2,10 @@
 
 Selenium automation for connecting multiple accounts to 9Router providers, then reading connection status and session data from 9Router's local SQLite database.
 
-Supported flows:
+Supported flows from `main.py`:
 
-- `main.py`: Antigravity provider with Google OAuth.
-- `main_kiro.py`: Kiro provider with AWS Builder ID / AWS SSO.
+- Antigravity provider with Google OAuth.
+- Kiro provider with AWS Builder ID / AWS SSO.
 
 ## Features
 
@@ -14,6 +14,7 @@ Supported flows:
 - Checks 9Router's SQLite database before browser automation and skips accounts already marked active.
 - Deletes stale or broken provider connections before retrying.
 - Saves progress after each account so interrupted runs can resume.
+- Formats console logs with timestamps, aligned labels, and terminal colors.
 - Keeps browser dumps and one-off probes under `scratch/`.
 
 ## Setup
@@ -47,22 +48,20 @@ Supported flows:
    - `ROUTER_URL`: local 9Router URL.
    - `ROUTER_PASSWORD`: local 9Router password.
    - `DB_PATH`: 9Router SQLite database path.
-   - `RESULTS_FILE`: Antigravity output file.
 
 ## Run
 
-Start 9Router first, then run one provider flow.
-
-Antigravity:
+Start 9Router first, then run `main.py` and choose a provider.
 
 ```powershell
 py -3.13 main.py
 ```
 
-Kiro:
+You can also pass the provider name directly.
 
 ```powershell
-py -3.13 main_kiro.py
+py -3.13 main.py antigravity
+py -3.13 main.py kiro
 ```
 
 ## Outputs
