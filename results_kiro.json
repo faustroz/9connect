@@ -1,0 +1,14 @@
+{
+  "cheyenne56080@gkmaill.com": {
+    "status": "Failed",
+    "last_checked": "2026-06-28T08:36:14.462712",
+    "session_info": null,
+    "error": "Exception: Account has no AWS Builder ID \u2014 redirected to AWS signup page: https://profile.aws.amazon.com/?workflowID=03e290ac-1fb9-4156-822f-b283f11fa8ea#/signup/start?workflowID=03e290ac-1fb9-4156-822f-b283f11fa8ea\nTraceback (most recent call last):\n  File \"D:\\Tools\\9router_login\\automation_kiro.py\", line 180, in connect_kiro_account\n    raise Exception(f\"Account has no AWS Builder ID \u2014 redirected to AWS signup page: {curr_url_after_continue}\")\nException: Account has no AWS Builder ID \u2014 redirected to AWS signup page: https://profile.aws.amazon.com/?workflowID=03e290ac-1fb9-4156-822f-b283f11fa8ea#/signup/start?workflowID=03e290ac-1fb9-4156-822f-b283f11fa8ea\n"
+  },
+  "devontae64800@gkmaill.com": {
+    "status": "Failed",
+    "last_checked": "2026-06-28T08:38:47.990499",
+    "session_info": null,
+    "error": "Exception: Account has no AWS Builder ID \u2014 redirected to AWS signup page: https://profile.aws.amazon.com/?workflowID=f36fc1ce-e897-470e-9da0-dc5edad61d25#/signup/start?workflowID=f36fc1ce-e897-470e-9da0-dc5edad61d25\nTraceback (most recent call last):\n  File \"D:\\Tools\\9router_login\\automation_kiro.py\", line 180, in connect_kiro_account\n    raise Exception(f\"Account has no AWS Builder ID \u2014 redirected to AWS signup page: {curr_url_after_continue}\")\nException: Account has no AWS Builder ID \u2014 redirected to AWS signup page: https://profile.aws.amazon.com/?workflowID=f36fc1ce-e897-470e-9da0-dc5edad61d25#/signup/start?workflowID=f36fc1ce-e897-470e-9da0-dc5edad61d25\n"
+  }
+}

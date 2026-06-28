@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+
+# Local credentials and run output
+accounts.json
+results*.json
+
+# Browser/debug captures and scratch probes
+scratch/
