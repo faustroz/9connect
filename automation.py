@@ -49,11 +49,12 @@ def launch_chrome():
         f"--user-data-dir={CHROME_USER_DATA_DIR}",
         "--no-sandbox",
         "--disable-gpu",
-        "--window-size=1280,800"
+        "--window-size=1280,800",
+        "about:blank"
     ]
-    
+
     proc = subprocess.Popen(chrome_cmd)
-    time.sleep(3)  # Allow Chrome time to startup
+    time.sleep(5)  # Allow Chrome time to startup
     return proc
 
 def get_driver():
@@ -106,12 +107,12 @@ def connect_antigravity_account(email, password):
         # 4. Navigate to Antigravity Provider page
         print("[9Router] Navigating to Antigravity page...")
         driver.get(f"{ROUTER_URL}/dashboard/providers/antigravity")
-        time.sleep(3)
-        
+        time.sleep(5)
+
         # 5. Open Credentials form (click Add, and bypass warning notice)
         print("[9Router] Opening connection form...")
         add_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model'))]"))
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model')) and not(contains(., 'Added'))]"))
         )
         add_btn.click()
         
@@ -181,36 +182,43 @@ def connect_antigravity_account(email, password):
         pass_next_btn.click()
         time.sleep(5)
         
-        # 7.3 Handle potential consent checkboxes and Allow/Continue click
-        print("[Google] Handling scopes and consents...")
-        # Checkboxes (click if they aren't selected yet)
-        try:
-            checkboxes = driver.find_elements(By.XPATH, "//input[@type='checkbox']")
-            for cb in checkboxes:
-                if not cb.is_selected():
-                    cb.click()
-                    time.sleep(0.5)
-        except:
-            pass
-            
-        # Allow/Continue Button
-        try:
-            allow_btn = driver.find_element(By.XPATH, "//button[contains(., 'Allow') or contains(., 'Continue') or contains(., 'I agree')]")
-            allow_btn.click()
-            time.sleep(4)
-        except:
-            pass
-            
-        # 7.4 Wait for redirect back to 9Router callback URL
+        # 7.3 Poll and handle all Google interstitial pages until callback redirect
         print("[OAuth] Waiting for redirect back to local callback URL...")
         callback_url = None
-        for _ in range(15):
+        for _ in range(30):
             curr_url = driver.current_url
+
             if "/callback" in curr_url:
                 callback_url = curr_url
                 break
+
+            # Checkboxes
+            try:
+                for cb in driver.find_elements(By.XPATH, "//input[@type='checkbox']"):
+                    if not cb.is_selected():
+                        cb.click()
+                        time.sleep(0.3)
+            except:
+                pass
+
+            # Any actionable button: Allow, Continue, I agree, Sign in, I understand
+            try:
+                btn = driver.find_element(By.XPATH, "//button[contains(., 'Allow') or contains(., 'I agree') or contains(., 'Sign in') or contains(., 'I understand') or contains(., 'Continue')]")
+                print(f"[Google] Clicking button: {btn.text.strip()}")
+                btn.click()
+                time.sleep(3)
+            except:
+                pass
+
+            # Scroll on terms pages to reveal hidden buttons
+            try:
+                if "termsofservice" in curr_url.lower() or "speedbump" in curr_url.lower():
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            except:
+                pass
+
             time.sleep(1)
-            
+
         if not callback_url:
             raise Exception(f"Failed to capture redirect callback URL. Current URL is: {driver.current_url}")
             
@@ -227,12 +235,18 @@ def connect_antigravity_account(email, password):
             EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model'))]"))
         )
         add_btn.click()
-        
-        continue_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'I Understand, Continue')]"))
-        )
-        continue_btn.click()
         time.sleep(2)
+
+        # Handle "I Understand, Continue" button if it appears (may not show second time)
+        try:
+            continue_btn = WebDriverWait(driver, 5).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'I Understand, Continue')]"))
+            )
+            continue_btn.click()
+            time.sleep(2)
+        except:
+            # Warning notice didn't appear, continue
+            pass
         
         # Paste captured callback URL in input field 2 (not readonly)
         print("[9Router] Pasting callback URL...")

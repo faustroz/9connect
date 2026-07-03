@@ -7,3 +7,5 @@ results*.json
 
 # Browser/debug captures and scratch probes
 scratch/
+accounts.json
+accounts.json

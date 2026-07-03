@@ -53,9 +53,10 @@ def launch_chrome():
         f"--user-data-dir={CHROME_USER_DATA_DIR}",
         "--no-sandbox",
         "--disable-gpu",
-        "--window-size=1280,800"
+        "--window-size=1280,800",
+        "about:blank"
     ]
-    
+
     proc = subprocess.Popen(chrome_cmd)
     time.sleep(5)  # Allow Chrome time to fully startup
     return proc
@@ -109,12 +110,12 @@ def connect_kiro_account(email, password):
         # 4. Navigate to Kiro Provider page
         print("[9Router] Navigating to Kiro page...")
         driver.get(f"{ROUTER_URL}/dashboard/providers/kiro")
-        time.sleep(3)
-        
-        # 5. Open Credentials form (click Add)
+        time.sleep(5)
+
+        # 5. Open Credentials form (click Add / Add Account / Add Another)
         print("[9Router] Opening connection form...")
         add_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model'))]"))
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model')) and not(contains(., 'Added'))]"))
         )
         add_btn.click()
         time.sleep(2)
@@ -142,132 +143,68 @@ def connect_kiro_account(email, password):
         driver.get(login_url)
         time.sleep(8)  # Allow AWS SSO page to fully render
         
-        # Accept Cookies if present to prevent covering elements
+        # Accept Cookies if present
         try:
             accept_btn = driver.find_element(By.XPATH, "//button[text()='Accept' or contains(@class, 'awsccc-u-btn-primary')]")
             accept_btn.click()
             time.sleep(1)
         except:
             pass
-            
-        # 9. Enter email robustly
-        print(f"[AWS] Submitting email... (URL: {driver.current_url[:80]})", flush=True)
-        email_field = wait.until(
-            EC.visibility_of_element_located((By.XPATH, "//input[@type='email']"))
+
+        # 9. Click Sign in with Google button
+        print("[AWS] Clicking Sign in with Google...", flush=True)
+        google_btn = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Sign in with Google') or contains(., 'Google')]"))
         )
-        print("[AWS] Email field found.", flush=True)
-        email_field.click()
+        google_btn.click()
+        time.sleep(5)
+
+        # 10. Google Login - Enter email
+        print("[Google] Entering email...")
+        g_email_field = wait.until(
+            EC.visibility_of_element_located((By.XPATH, "//input[@type='email' or @id='identifierId' or @name='identifier']"))
+        )
+        g_email_field.click()
         time.sleep(1)
-        
         for attempt in range(3):
-            email_field.clear()
-            email_field.send_keys(email)
+            g_email_field.clear()
+            g_email_field.send_keys(email)
             time.sleep(0.5)
-            if email_field.get_attribute("value") == email:
+            if g_email_field.get_attribute("value") == email:
                 break
             time.sleep(0.5)
-            
-        continue_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Continue')]"))
+
+        g_next_btn = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//*[@id='identifierNext']//button | //button[contains(., 'Next')]"))
         )
-        continue_btn.click()
-        time.sleep(8)  # Allow redirect to complete fully
-        
-        # Check for AWS signup redirect (account has no AWS Builder ID registered)
-        curr_url_after_continue = driver.current_url
-        print(f"[AWS] URL after Continue: {curr_url_after_continue[:120]}", flush=True)
-        if "profile.aws.amazon.com" in curr_url_after_continue and "signup" in curr_url_after_continue:
-            raise Exception(f"Account has no AWS Builder ID - redirected to AWS signup page: {curr_url_after_continue}")
-        if "profile.aws.amazon.com" in curr_url_after_continue:
-            raise Exception(f"Account has no AWS Builder ID - on AWS profile page: {curr_url_after_continue}")
-        
-        # 10. Perform Google Login (or standard password field if it didn't federate)
-        print("[Google] Handling authentication redirect...")
-        try:
-            g_email_field = WebDriverWait(driver, 10).until(
-                EC.visibility_of_element_located((By.XPATH, "//input[@type='email' or @id='identifierId' or @name='identifier']"))
-            )
-            # Enter Google email
-            g_email_field.click()
-            time.sleep(1)
-            for attempt in range(3):
-                g_email_field.clear()
-                g_email_field.send_keys(email)
-                time.sleep(0.5)
-                if g_email_field.get_attribute("value") == email:
-                    break
-                time.sleep(0.5)
-                
-            g_next_btn = wait.until(
-                EC.element_to_be_clickable((By.XPATH, "//*[@id='identifierNext']//button | //button[contains(., 'Next')]"))
-            )
-            g_next_btn.click()
-            time.sleep(4)
-            
-            # After clicking Next on Google email, check for deleted/non-existent account
-            curr_url_after_g = driver.current_url
-            if "deletedaccount" in curr_url_after_g or "Account deleted" in driver.title:
-                raise Exception("Google Account has been deleted.")
-            if "find your Google Account" in driver.page_source or "Couldn't find your" in driver.page_source:
-                raise Exception("Google Account does not exist.")
-                
-        except Exception as e:
-            # Rethrow our specific errors immediately
-            if any(kw in str(e) for kw in ["no AWS Builder ID", "deleted", "does not exist"]):
-                raise
-            # Otherwise may be on AWS password screen - continue
-            
-        # Enter Password (either Google or AWS password screen)
-        print("[Google/AWS] Entering password...")
-        try:
-            password_field = WebDriverWait(driver, 8).until(
-                EC.visibility_of_element_located((By.XPATH, "//input[@type='password' or @name='password']"))
-            )
-        except Exception as e:
-            # Check for error page safely
-            try:
-                page_text = driver.page_source
-                curr_url = driver.current_url
-                curr_title = driver.title
-            except Exception as read_err:
-                page_text = ""
-                curr_url = ""
-                curr_title = ""
-                print(f"[Debug] Could not read page details: {read_err}", flush=True)
+        g_next_btn.click()
+        time.sleep(4)
 
-            if "find your Google Account" in page_text or "Couldn't find your" in page_text:
-                raise Exception("Google Account does not exist.")
-            if "deleted" in curr_url or "deletedaccount" in curr_url or "Account deleted" in curr_title or "Account deleted" in page_text:
-                raise Exception("Google Account has been deleted.")
-            if "rejected" in curr_url or "sign you in" in page_text.lower() or "Couldn't sign you in" in curr_title or "may not be secure" in page_text:
-                raise Exception("Google blocked sign-in with security warning ('browser or app not secure').")
-            if "profile.aws.amazon.com" in curr_url:
-                raise Exception(f"Account has no AWS Builder ID - on AWS profile/signup page: {curr_url}")
-            raise Exception(f"Failed or timed out waiting for password field. Error: {e}")
-
+        # 11. Google Login - Enter password
+        print("[Google] Entering password...")
+        password_field = wait.until(
+            EC.visibility_of_element_located((By.XPATH, "//input[@type='password' or @name='password']"))
+        )
         password_field.clear()
         password_field.send_keys(password)
-        
-        # Click Next/Sign in
-        submit_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//*[@id='passwordNext']//button | //button[contains(., 'Next') or contains(., 'Sign in') or @type='submit']"))
+
+        pass_next_btn = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//*[@id='passwordNext']//button | //button[contains(., 'Next')]"))
         )
-        submit_btn.click()
-        time.sleep(10)
-        
-        # 11. Handle any Google Consent/Scopes (only if prompted)
+        pass_next_btn.click()
+        time.sleep(5)
+
+        # 11.5 Click "Continue" if it appears (intermediate step before Allow)
         try:
-            checkboxes = driver.find_elements(By.XPATH, "//input[@type='checkbox']")
-            for cb in checkboxes:
-                if not cb.is_selected():
-                    cb.click()
-                    time.sleep(0.5)
-            allow_btn = driver.find_element(By.XPATH, "//button[contains(., 'Allow') or contains(., 'Continue') or contains(., 'I agree')]")
-            allow_btn.click()
-            time.sleep(5)
+            continue_btn = WebDriverWait(driver, 8).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Continue')]"))
+            )
+            print("[AWS] Clicking Continue...")
+            continue_btn.click()
+            time.sleep(3)
         except:
             pass
-            
+
         # 12. Click "Allow" on AWS SSO Confirmation Screen
         print("[AWS] Clicking Allow on permission confirmation...")
         allow_btn = WebDriverWait(driver, 15).until(

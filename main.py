@@ -190,8 +190,9 @@ def main():
         save_results(results, results_file)
 
         if i < len(accounts):
-            print("[Info] Cooling down 5 seconds before next account...")
-            time.sleep(5)
+            cooldown = 60 + (i * 5)  # Increase cooldown progressively: 60s, 65s, 70s, etc.
+            print(f"[Info] Cooling down {cooldown} seconds before next account to avoid captcha...")
+            time.sleep(cooldown)
 
     print("\n" + "=" * 72)
     print("RUN SUMMARY")
