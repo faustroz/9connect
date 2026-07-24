@@ -3,6 +3,9 @@ import json
 import sys
 import time
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+import queue
 
 from log_style import install_pretty_print
 
@@ -12,7 +15,10 @@ import db_helper
 import automation
 import automation_kiro
 
-ACCOUNTS_FILE = "accounts.json"
+ACCOUNTS_FILE = "accounts.txt"
+PARALLEL_BROWSERS = 1
+
+from config import DEBUG_PORTS
 
 PROVIDERS = {
     "1": {
@@ -41,21 +47,26 @@ PROVIDER_ALIASES = {
 }
 
 def load_accounts():
-    """Load accounts from accounts.json."""
+    """Load accounts from accounts.txt (email|password format)."""
     if not os.path.exists(ACCOUNTS_FILE):
         print(f"[Error] '{ACCOUNTS_FILE}' not found. Please create it first.")
-        sample = [
-            {"email": "sample_email_1@gmail.com", "password": "sample_password_1"},
-            {"email": "sample_email_2@gmail.com", "password": "sample_password_2"}
-        ]
         with open(ACCOUNTS_FILE, "w", encoding="utf-8") as f:
-            json.dump(sample, f, indent=2)
+            f.write("sample_email_1@gmail.com|sample_password_1\n")
+            f.write("sample_email_2@gmail.com|sample_password_2\n")
         print(f"[Info] Created a template '{ACCOUNTS_FILE}'. Please configure it before running.")
         return []
 
     try:
+        accounts = []
         with open(ACCOUNTS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split("|", 1)
+                if len(parts) == 2:
+                    accounts.append({"email": parts[0].strip(), "password": parts[1].strip()})
+        return accounts
     except Exception as e:
         print(f"[Error] Failed to read '{ACCOUNTS_FILE}': {e}")
         return []
@@ -101,6 +112,72 @@ def select_provider():
             return PROVIDERS[provider_id]
         print("[Error] Invalid choice. Enter 1 for Antigravity or 2 for Kiro.")
 
+def process_account(acc, i, total, provider, provider_key, results, results_lock, results_file, port_queue):
+    port = port_queue.get()
+    email = acc.get("email")
+    password = acc.get("password")
+
+    try:
+        if not email or not password:
+            print(f"[Warning] Account #{i} has missing email or password. Skipping.")
+            return
+
+        if (
+            provider["skip_success_results"]
+            and email in results
+            and results[email].get("status") == "Account Connected"
+        ):
+            print(f"[Info] Account {email} already marked Connected in results. Skipping.")
+            return
+
+        print("\n" + "-" * 72)
+        print(f"[Info] Account {i}/{total}: {email} (port {port})")
+        print("-" * 72)
+
+        is_active = db_helper.is_connection_active(email, provider=provider_key)
+        if is_active:
+            print(f"[Info] Account {email} is already active/connected for {provider['name']} in 9Router. Skipping.")
+            db_conn = db_helper.get_connection(email, provider=provider_key)
+            with results_lock:
+                results[email] = {
+                    "status": "Account Connected",
+                    "last_checked": datetime.now().isoformat(),
+                    "session_info": db_conn["data"] if db_conn else None,
+                    "error": None
+                }
+                save_results(results, results_file)
+            return "skip"
+
+        existing_conn = db_helper.get_connection(email, provider=provider_key)
+        if existing_conn:
+            print(f"[Info] Found existing broken connection for {email} ({provider_key}). Deleting it first.")
+            db_helper.delete_connection(email, provider=provider_key)
+
+        res = provider["connect"](email, password, port)
+
+        timestamp = datetime.now().isoformat()
+        with results_lock:
+            if res["success"]:
+                results[email] = {
+                    "status": "Account Connected",
+                    "last_checked": timestamp,
+                    "session_info": res["session_info"]["data"] if res["session_info"] else None,
+                    "error": None
+                }
+            else:
+                results[email] = {
+                    "status": "Failed",
+                    "last_checked": timestamp,
+                    "session_info": None,
+                    "error": res["error"]
+                }
+            save_results(results, results_file)
+
+        return res["success"]
+
+    finally:
+        port_queue.put(port)
+
 def main():
     provider = select_provider()
     provider_key = provider["key"]
@@ -117,82 +194,38 @@ def main():
         return
 
     print(f"[Info] Loaded {len(accounts)} accounts from '{ACCOUNTS_FILE}'.")
+    print(f"[Info] Running with {PARALLEL_BROWSERS} parallel browsers.")
 
     results = load_results(results_file)
+    results_lock = threading.Lock()
 
-    processed = 0
     success_count = 0
     failed_count = 0
+    processed = 0
 
-    for i, acc in enumerate(accounts, 1):
-        email = acc.get("email")
-        password = acc.get("password")
+    port_queue = queue.Queue()
+    for p in DEBUG_PORTS:
+        port_queue.put(p)
 
-        if not email or not password:
-            print(f"[Warning] Account #{i} has missing email or password. Skipping.")
-            continue
+    with ThreadPoolExecutor(max_workers=PARALLEL_BROWSERS) as executor:
+        futures = {}
+        for i, acc in enumerate(accounts, 1):
+            future = executor.submit(process_account, acc, i, len(accounts), provider, provider_key, results, results_lock, results_file, port_queue)
+            futures[future] = acc.get("email")
 
-        if (
-            provider["skip_success_results"]
-            and email in results
-            and results[email].get("status") == "Account Connected"
-        ):
-            print(f"[Info] Account {email} already marked Connected in results. Skipping.")
-            success_count += 1
-            processed += 1
-            continue
-
-        print("\n" + "-" * 72)
-        print(f"[Info] Account {i}/{len(accounts)}: {email}")
-        print("-" * 72)
-
-        is_active = db_helper.is_connection_active(email, provider=provider_key)
-        if is_active:
-            print(f"[Info] Account {email} is already active/connected for {provider['name']} in 9Router. Skipping.")
-            db_conn = db_helper.get_connection(email, provider=provider_key)
-            results[email] = {
-                "status": "Account Connected",
-                "last_checked": datetime.now().isoformat(),
-                "session_info": db_conn["data"] if db_conn else None,
-                "error": None
-            }
-            save_results(results, results_file)
-            success_count += 1
-            processed += 1
-            continue
-
-        existing_conn = db_helper.get_connection(email, provider=provider_key)
-        if existing_conn:
-            print(f"[Info] Found existing broken connection for {email} ({provider_key}). Deleting it first.")
-            db_helper.delete_connection(email, provider=provider_key)
-
-        res = provider["connect"](email, password)
-
-        timestamp = datetime.now().isoformat()
-        if res["success"]:
-            results[email] = {
-                "status": "Account Connected",
-                "last_checked": timestamp,
-                "session_info": res["session_info"]["data"] if res["session_info"] else None,
-                "error": None
-            }
-            success_count += 1
-        else:
-            results[email] = {
-                "status": "Failed",
-                "last_checked": timestamp,
-                "session_info": None,
-                "error": res["error"]
-            }
-            failed_count += 1
-
-        processed += 1
-        save_results(results, results_file)
-
-        if i < len(accounts):
-            cooldown = 60 + (i * 5)  # Increase cooldown progressively: 60s, 65s, 70s, etc.
-            print(f"[Info] Cooling down {cooldown} seconds before next account to avoid captcha...")
-            time.sleep(cooldown)
+        for future in as_completed(futures):
+            email = futures[future]
+            try:
+                result = future.result()
+                processed += 1
+                if result is True:
+                    success_count += 1
+                elif result is False:
+                    failed_count += 1
+            except Exception as e:
+                print(f"[Error] Unexpected error for {email}: {e}")
+                failed_count += 1
+                processed += 1
 
     print("\n" + "=" * 72)
     print("RUN SUMMARY")
@@ -204,4 +237,7 @@ def main():
     print("=" * 72)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[Info] Interrupted. Exiting...")

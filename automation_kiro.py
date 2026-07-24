@@ -11,46 +11,42 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 from config import (
-    CHROME_PATH, CHROMEDRIVER_PATH, CHROME_USER_DATA_DIR, DEBUG_PORT,
+    CHROME_PATH, CHROMEDRIVER_PATH, CHROME_USER_DATA_DIR, DEBUG_PORTS,
     ROUTER_URL, ROUTER_PASSWORD
 )
 import db_helper
 
-def kill_dev_chrome():
-    """Kill any existing Chrome and chromedriver processes completely."""
-    # Kill chromedriver
+def kill_dev_chrome(port):
     subprocess.run('powershell -NonInteractive -Command "Stop-Process -Name \'chromedriver\' -Force -ErrorAction SilentlyContinue"', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    
-    # Kill Chrome
-    cmd = 'powershell -NonInteractive -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'chrome.exe\'\\" | Where-Object CommandLine -like \\"*chrome_dev_profile*\\" | ForEach-Object { Stop-Process $_.ProcessId -Force }"'
+    cmd = f'powershell -NonInteractive -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'chrome.exe\'\\" | Where-Object CommandLine -like \\"*chrome_dev_profile_{port}*\\" | ForEach-Object {{ Stop-Process $_.ProcessId -Force }}"'
     try:
         subprocess.run(cmd, shell=True, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     except:
         pass
 
-def clean_user_data_dir():
-    """Delete the temporary Chrome profile directory to start with a fresh session."""
+def clean_user_data_dir(port):
     import shutil
-    if os.path.exists(CHROME_USER_DATA_DIR):
+    profile_dir = f"{CHROME_USER_DATA_DIR}_{port}"
+    if os.path.exists(profile_dir):
         for _ in range(3):
             try:
-                shutil.rmtree(CHROME_USER_DATA_DIR)
+                shutil.rmtree(profile_dir)
                 break
             except:
                 time.sleep(1)
 
-def launch_chrome():
-    """Launch Google Chrome with remote debugging and a clean profile."""
-    print("[Chrome] Cleaning up stale Chrome processes and profile...")
-    kill_dev_chrome()
-    clean_user_data_dir()
-    
-    print(f"[Chrome] Launching Chrome with remote debugging on port {DEBUG_PORT}...")
+def launch_chrome(port):
+    print(f"[Chrome] Cleaning up stale Chrome processes and profile for port {port}...")
+    kill_dev_chrome(port)
+    clean_user_data_dir(port)
+
+    profile_dir = f"{CHROME_USER_DATA_DIR}_{port}"
+    print(f"[Chrome] Launching Chrome with remote debugging on port {port}...")
     chrome_cmd = [
         CHROME_PATH,
-        f"--remote-debugging-port={DEBUG_PORT}",
-        f"--user-data-dir={CHROME_USER_DATA_DIR}",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
         "--no-sandbox",
         "--disable-gpu",
         "--window-size=1280,800",
@@ -58,15 +54,13 @@ def launch_chrome():
     ]
 
     proc = subprocess.Popen(chrome_cmd)
-    time.sleep(5)  # Allow Chrome time to fully startup
+    time.sleep(5)
     return proc
 
-def get_driver():
-    """Connect Selenium to the remote debugging Chrome instance."""
+def get_driver(port):
     options = Options()
-    options.add_experimental_option("debuggerAddress", f"127.0.0.1:{DEBUG_PORT}")
-    service = Service(executable_path=CHROMEDRIVER_PATH)
-    driver = webdriver.Chrome(service=service, options=options)
+    options.add_experimental_option("debuggerAddress", f"127.0.0.1:{port}")
+    driver = webdriver.Chrome(options=options)
     return driver
 
 def login_to_router(driver):
@@ -92,16 +86,16 @@ def login_to_router(driver):
             print(f"[9Router] Login input failed: {e}")
             raise e
 
-def connect_kiro_account(email, password):
+def connect_kiro_account(email, password, port=9222):
     """Run the entire automation flow for a single Kiro account."""
     chrome_proc = None
     driver = None
     try:
         # 1. Launch Chrome
-        chrome_proc = launch_chrome()
+        chrome_proc = launch_chrome(port)
         
         # 2. Get Driver
-        driver = get_driver()
+        driver = get_driver(port)
         wait = WebDriverWait(driver, 15)
         
         # 3. Login to Router

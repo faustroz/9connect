@@ -11,42 +11,44 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 from config import (
-    CHROME_PATH, CHROMEDRIVER_PATH, CHROME_USER_DATA_DIR, DEBUG_PORT,
+    CHROME_PATH, CHROMEDRIVER_PATH, CHROME_USER_DATA_DIR, DEBUG_PORTS,
     ROUTER_URL, ROUTER_PASSWORD
 )
 import db_helper
 
-def kill_dev_chrome():
-    """Kill any existing Chrome processes running with the dev profile to release locks."""
-    cmd = 'powershell -NonInteractive -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'chrome.exe\'\\" | Where-Object CommandLine -like \\"*chrome_dev_profile*\\" | ForEach-Object { Stop-Process $_.ProcessId -Force }"'
+def kill_dev_chrome(port):
+    """Kill any existing Chrome processes running on the given debug port."""
+    cmd = f'powershell -NonInteractive -Command "Get-CimInstance Win32_Process -Filter \\"Name = \'chrome.exe\'\\" | Where-Object CommandLine -like \\"*chrome_dev_profile_{port}*\\" | ForEach-Object {{ Stop-Process $_.ProcessId -Force }}"'
     try:
         subprocess.run(cmd, shell=True, timeout=5, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         time.sleep(1)
     except:
         pass
 
-def clean_user_data_dir():
-    """Delete the temporary Chrome profile directory to start with a fresh session."""
+def clean_user_data_dir(port):
+    """Delete the temporary Chrome profile directory for the given port."""
     import shutil
-    if os.path.exists(CHROME_USER_DATA_DIR):
+    profile_dir = f"{CHROME_USER_DATA_DIR}_{port}"
+    if os.path.exists(profile_dir):
         for _ in range(3):
             try:
-                shutil.rmtree(CHROME_USER_DATA_DIR)
+                shutil.rmtree(profile_dir)
                 break
             except:
                 time.sleep(1)
 
-def launch_chrome():
-    """Launch Google Chrome with remote debugging and a clean profile."""
-    print("[Chrome] Cleaning up stale Chrome processes and profile...")
-    kill_dev_chrome()
-    clean_user_data_dir()
-    
-    print(f"[Chrome] Launching Chrome with remote debugging on port {DEBUG_PORT}...")
+def launch_chrome(port):
+    """Launch Google Chrome with remote debugging on the given port."""
+    print(f"[Chrome] Cleaning up stale Chrome processes and profile for port {port}...")
+    kill_dev_chrome(port)
+    clean_user_data_dir(port)
+
+    profile_dir = f"{CHROME_USER_DATA_DIR}_{port}"
+    print(f"[Chrome] Launching Chrome with remote debugging on port {port}...")
     chrome_cmd = [
         CHROME_PATH,
-        f"--remote-debugging-port={DEBUG_PORT}",
-        f"--user-data-dir={CHROME_USER_DATA_DIR}",
+        f"--remote-debugging-port={port}",
+        f"--user-data-dir={profile_dir}",
         "--no-sandbox",
         "--disable-gpu",
         "--window-size=1280,800",
@@ -54,13 +56,13 @@ def launch_chrome():
     ]
 
     proc = subprocess.Popen(chrome_cmd)
-    time.sleep(5)  # Allow Chrome time to startup
+    time.sleep(5)
     return proc
 
-def get_driver():
-    """Connect Selenium to the remote debugging Chrome instance."""
+def get_driver(port):
+    """Connect Selenium to the remote debugging Chrome instance on the given port."""
     options = Options()
-    options.add_experimental_option("debuggerAddress", f"127.0.0.1:{DEBUG_PORT}")
+    options.add_experimental_option("debuggerAddress", f"127.0.0.1:{port}")
     service = Service(executable_path=CHROMEDRIVER_PATH)
     driver = webdriver.Chrome(service=service, options=options)
     return driver
@@ -89,16 +91,16 @@ def login_to_router(driver):
             print(f"[9Router] Login input failed: {e}")
             raise e
 
-def connect_antigravity_account(email, password):
+def connect_antigravity_account(email, password, port=9222):
     """Run the entire automation flow for a single account."""
     chrome_proc = None
     driver = None
     try:
         # 1. Launch Chrome
-        chrome_proc = launch_chrome()
+        chrome_proc = launch_chrome(port)
         
         # 2. Get Driver
-        driver = get_driver()
+        driver = get_driver(port)
         wait = WebDriverWait(driver, 15)
         
         # 3. Login to Router
@@ -111,17 +113,33 @@ def connect_antigravity_account(email, password):
 
         # 5. Open Credentials form (click Add, and bypass warning notice)
         print("[9Router] Opening connection form...")
-        add_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model')) and not(contains(., 'Added'))]"))
-        )
-        add_btn.click()
-        
-        continue_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'I Understand, Continue')]"))
-        )
-        continue_btn.click()
-        time.sleep(2)
-        
+        for attempt in range(3):
+            add_btn = wait.until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model')) and not(contains(., 'Added'))]"))
+            )
+            add_btn.click()
+            time.sleep(2)
+
+            try:
+                continue_btn = WebDriverWait(driver, 8).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'I Understand, Continue')]"))
+                )
+                continue_btn.click()
+                time.sleep(2)
+            except:
+                pass
+
+            try:
+                WebDriverWait(driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//input[@readonly]"))
+                )
+                break
+            except:
+                if attempt < 2:
+                    print(f"[9Router] OAuth input not found, retrying... (attempt {attempt + 1})")
+                    driver.get(f"{ROUTER_URL}/dashboard/providers/antigravity")
+                    time.sleep(3)
+
         # 6. Read Google OAuth URL
         oauth_input = wait.until(
             EC.presence_of_element_located((By.XPATH, "//input[@readonly]"))
@@ -159,19 +177,37 @@ def connect_antigravity_account(email, password):
         
         # 7.2 Enter password
         print("[Google] Entering password...")
-        try:
-            password_field = WebDriverWait(driver, 8).until(
-                EC.visibility_of_element_located((By.XPATH, "//input[@type='password' or @name='password']"))
-            )
-        except Exception as e:
+        password_field = None
+        for _ in range(20):
+            try:
+                password_field = driver.find_element(By.XPATH, "//input[@type='password' or @name='password']")
+                if password_field.is_displayed():
+                    break
+                password_field = None
+            except:
+                password_field = None
+
             page_text = driver.page_source
-            if "find your Google Account" in page_text or "Couldn’t find your" in page_text or "Couldn't find your" in page_text:
+            if "find your Google Account" in page_text or "Couldn't find your" in page_text:
                 raise Exception("Google Account does not exist.")
-            if "deleted" in driver.current_url or "deletedaccount" in driver.current_url or "Account deleted" in driver.title or "Account deleted" in page_text:
+            if "Account deleted" in page_text or "deletedaccount" in driver.current_url:
                 raise Exception("Google Account has been deleted.")
-            if "rejected" in driver.current_url or "sign you in" in page_text.lower() or "Couldn't sign you in" in driver.title or "may not be secure" in page_text:
+            if "may not be secure" in page_text or "Couldn't sign you in" in page_text:
                 raise Exception("Google blocked sign-in with security warning ('browser or app not secure').")
-            raise Exception(f"Google Sign-In failed or timed out waiting for password field. Error: {e}")
+
+            try:
+                btn = driver.find_element(By.XPATH, "//button[contains(., 'Try another way') or contains(., 'Next') or contains(., 'Continue')]")
+                if btn.is_displayed():
+                    btn.click()
+                    time.sleep(2)
+                    continue
+            except:
+                pass
+
+            time.sleep(1)
+
+        if not password_field:
+            raise Exception(f"Google Sign-In failed or timed out waiting for password field. URL: {driver.current_url}")
 
         password_field.clear()
         password_field.send_keys(password)
@@ -203,7 +239,7 @@ def connect_antigravity_account(email, password):
 
             # Any actionable button: Allow, Continue, I agree, Sign in, I understand
             try:
-                btn = driver.find_element(By.XPATH, "//button[contains(., 'Allow') or contains(., 'I agree') or contains(., 'Sign in') or contains(., 'I understand') or contains(., 'Continue')]")
+                btn = driver.find_element(By.XPATH, "//button[contains(., 'Allow') or contains(., 'I agree') or contains(., 'Sign in') or contains(., 'I understand') or contains(., 'Continue') or contains(., 'Login') or contains(., 'Masuk')]")
                 print(f"[Google] Clicking button: {btn.text.strip()}")
                 btn.click()
                 time.sleep(3)
@@ -227,15 +263,15 @@ def connect_antigravity_account(email, password):
         # 8. Submit Callback URL to 9Router to finish connection
         print("[9Router] Navigating back to Antigravity page...")
         driver.get(f"{ROUTER_URL}/dashboard/providers/antigravity")
-        time.sleep(3)
+        time.sleep(5)
         
         # Open credentials form again
         print("[9Router] Re-opening credentials form...")
         add_btn = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model'))]"))
+            EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Add') and not(contains(., 'Model')) and not(contains(., 'Added'))]"))
         )
         add_btn.click()
-        time.sleep(2)
+        time.sleep(3)
 
         # Handle "I Understand, Continue" button if it appears (may not show second time)
         try:
@@ -243,14 +279,13 @@ def connect_antigravity_account(email, password):
                 EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'I Understand, Continue')]"))
             )
             continue_btn.click()
-            time.sleep(2)
+            time.sleep(3)
         except:
-            # Warning notice didn't appear, continue
             pass
         
         # Paste captured callback URL in input field 2 (not readonly)
         print("[9Router] Pasting callback URL...")
-        paste_input = wait.until(
+        paste_input = WebDriverWait(driver, 30).until(
             EC.presence_of_element_located((By.XPATH, "//input[not(@readonly) and @type='text']"))
         )
         paste_input.clear()
